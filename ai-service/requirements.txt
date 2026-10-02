@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic-settings==2.5.2
+langchain==0.3.0
+langgraph==0.2.39
+psycopg[binary]==3.2.3
+redis==5.0.8
+python-multipart==0.0.12

@@ -1,0 +1,47 @@
+# 开发环境配置 —— 使用 H2 内存数据库，跳过 Redis
+spring:
+  datasource:
+    url: jdbc:h2:mem:mtc;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  data:
+    redis:
+      # 开发环境：不连 Redis，用空配置（RedisTemplate 会报错，这里先不配）
+      host: localhost
+      port: 6379
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+management:
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: false
+      validate-group-membership: false
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+mtc:
+  ai:
+    base-url: http://localhost:8000
+  demo:
+    enabled: true
+    username: admin
+    password: admin123
+
+logging:
+  level:
+    com.mtc: DEBUG
+    org.springframework.security: DEBUG

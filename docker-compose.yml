@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: mtc-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: mtc-redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: mtc-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      MTC_JWT_SECRET: ${MTC_JWT_SECRET}
+      MTC_JWT_EXPIRE_SECONDS: ${MTC_JWT_EXPIRE_SECONDS}
+      MTC_AI_BASE_URL: http://ai-service:8000
+      MTC_DEMO_ENABLED: ${MTC_DEMO_ENABLED}
+      MTC_DEMO_USERNAME: ${MTC_DEMO_USERNAME}
+      MTC_DEMO_PASSWORD: ${MTC_DEMO_PASSWORD}
+    ports:
+      - "${BACKEND_PORT}:8080"
+
+  ai-service:
+    build: ./ai-service
+    container_name: mtc-ai-service
+    depends_on:
+      - redis
+    environment:
+      APP_ENV: ${APP_ENV}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "${AI_SERVICE_PORT}:8000"
+
+  web:
+    build: ./web
+    container_name: mtc-web
+    depends_on:
+      - backend
+    ports:
+      - "${WEB_PORT}:80"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:${BACKEND_PORT}
+
+volumes:
+  pgdata:
+  redisdata:

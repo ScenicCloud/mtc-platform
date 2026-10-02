@@ -1,0 +1,14 @@
+.env
+.env.local
+target/
+node_modules/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.idea/
+.vscode/
+*.log
+.DS_Store
