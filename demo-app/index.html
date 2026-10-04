@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TodoApp - 待办事项应用</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- 登录页 -->
+    <div v-if="currentPage === 'login'" class="auth-container">
+      <div class="auth-card">
+        <h1 class="app-title">📝 TodoApp</h1>
+        <p class="app-subtitle">登录你的账户</p>
+        <form @submit.prevent="handleLogin">
+          <div class="form-item">
+            <label for="login-username">用户名</label>
+            <input
+              id="login-username"
+              v-model="loginForm.username"
+              type="text"
+              placeholder="请输入用户名"
+              data-testid="login-username"
+            />
+            <span v-if="loginErrors.username" class="error-msg" data-testid="login-username-error">
+              {{ loginErrors.username }}
+            </span>
+          </div>
+          <div class="form-item">
+            <label for="login-password">密码</label>
+            <input
+              id="login-password"
+              v-model="loginForm.password"
+              type="password"
+              placeholder="请输入密码"
+              data-testid="login-password"
+            />
+            <span v-if="loginErrors.password" class="error-msg" data-testid="login-password-error">
+              {{ loginErrors.password }}
+            </span>
+          </div>
+          <div v-if="loginErrors.general" class="error-alert" data-testid="login-general-error">
+            {{ loginErrors.general }}
+          </div>
+          <button type="submit" class="btn btn-primary" data-testid="login-submit-btn">
+            登录
+          </button>
+        </form>
+        <div class="auth-footer">
+          还没有账户？
+          <a href="#" @click.prevent="goToRegister" data-testid="go-to-register">立即注册</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 注册页 -->
+    <div v-if="currentPage === 'register'" class="auth-container">
+      <div class="auth-card">
+        <h1 class="app-title">📝 TodoApp</h1>
+        <p class="app-subtitle">创建新账户</p>
+        <form @submit.prevent="handleRegister">
+          <div class="form-item">
+            <label for="reg-username">用户名</label>
+            <input
+              id="reg-username"
+              v-model="registerForm.username"
+              type="text"
+              placeholder="3-20 个字符"
+              data-testid="register-username"
+            />
+            <span v-if="registerErrors.username" class="error-msg" data-testid="register-username-error">
+              {{ registerErrors.username }}
+            </span>
+          </div>
+          <div class="form-item">
+            <label for="reg-password">密码</label>
+            <input
+              id="reg-password"
+              v-model="registerForm.password"
+              type="password"
+              placeholder="至少 6 个字符"
+              data-testid="register-password"
+            />
+            <span v-if="registerErrors.password" class="error-msg" data-testid="register-password-error">
+              {{ registerErrors.password }}
+            </span>
+          </div>
+          <div class="form-item">
+            <label for="reg-confirm">确认密码</label>
+            <input
+              id="reg-confirm"
+              v-model="registerForm.confirmPassword"
+              type="password"
+              placeholder="请再次输入密码"
+              data-testid="register-confirm"
+            />
+            <span v-if="registerErrors.confirmPassword" class="error-msg" data-testid="register-confirm-error">
+              {{ registerErrors.confirmPassword }}
+            </span>
+          </div>
+          <div v-if="registerErrors.general" class="error-alert" data-testid="register-general-error">
+            {{ registerErrors.general }}
+          </div>
+          <button type="submit" class="btn btn-primary" data-testid="register-submit-btn">
+            注册
+          </button>
+        </form>
+        <div class="auth-footer">
+          已有账户？
+          <a href="#" @click.prevent="goToLogin" data-testid="go-to-login">返回登录</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主页（待办列表） -->
+    <div v-if="currentPage === 'dashboard'" class="dashboard">
+      <header class="dashboard-header">
+        <div class="header-left">
+          <span class="logo">📝 TodoApp</span>
+        </div>
+        <div class="header-right">
+          <span class="welcome" data-testid="welcome-user">欢迎，{{ currentUser }}</span>
+          <button class="btn btn-text" @click="handleLogout" data-testid="logout-btn">退出登录</button>
+        </div>
+      </header>
+
+      <main class="dashboard-main">
+        <div class="todo-container">
+          <h2 class="todo-title">我的待办</h2>
+
+          <!-- 添加待办 -->
+          <div class="todo-input-row">
+            <input
+              v-model="newTodo"
+              type="text"
+              placeholder="添加新的待办事项..."
+              @keyup.enter="addTodo"
+              data-testid="todo-input"
+            />
+            <button class="btn btn-primary" @click="addTodo" data-testid="todo-add-btn">
+              添加
+            </button>
+          </div>
+          <span v-if="todoError" class="error-msg" data-testid="todo-input-error">{{ todoError }}</span>
+
+          <!-- 筛选标签 -->
+          <div class="filter-tabs" data-testid="filter-tabs">
+            <button
+              :class="['filter-tab', { active: filter === 'all' }]"
+              @click="filter = 'all'"
+              data-testid="filter-all"
+            >
+              全部 ({{ allCount }})
+            </button>
+            <button
+              :class="['filter-tab', { active: filter === 'active' }]"
+              @click="filter = 'active'"
+              data-testid="filter-active"
+            >
+              进行中 ({{ activeCount }})
+            </button>
+            <button
+              :class="['filter-tab', { active: filter === 'completed' }]"
+              @click="filter = 'completed'"
+              data-testid="filter-completed"
+            >
+              已完成 ({{ completedCount }})
+            </button>
+          </div>
+
+          <!-- 待办列表 -->
+          <ul class="todo-list" data-testid="todo-list">
+            <li
+              v-for="(todo, index) in filteredTodos"
+              :key="todo.id"
+              :class="['todo-item', { completed: todo.completed }]"
+              :data-testid="'todo-item-' + index"
+            >
+              <label class="todo-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="todo.completed"
+                  @change="toggleTodo(todo.id)"
+                  :data-testid="'todo-checkbox-' + index"
+                />
+                <span class="checkmark"></span>
+              </label>
+              <span class="todo-text" :data-testid="'todo-text-' + index">{{ todo.text }}</span>
+              <button
+                class="btn btn-delete"
+                @click="deleteTodo(todo.id)"
+                :data-testid="'todo-delete-' + index"
+              >
+                删除
+              </button>
+            </li>
+          </ul>
+
+          <div v-if="filteredTodos.length === 0" class="empty-state" data-testid="empty-state">
+            {{ emptyStateText }}
+          </div>
+
+          <!-- 底部操作 -->
+          <div v-if="todos.length > 0" class="todo-footer">
+            <span class="todo-count" data-testid="todo-count">
+              还剩 {{ activeCount }} 项未完成
+            </span>
+            <button
+              v-if="completedCount > 0"
+              class="btn btn-text btn-clear"
+              @click="clearCompleted"
+              data-testid="clear-completed-btn"
+            >
+              清除已完成
+            </button>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

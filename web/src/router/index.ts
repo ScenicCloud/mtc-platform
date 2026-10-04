@@ -9,14 +9,20 @@ const routes = [
     meta: { requiresAuth: false },
   },
   {
-    path: '/sample',
-    name: 'Sample',
-    component: () => import('../views/Sample.vue'),
+    path: '/projects',
+    name: 'Projects',
+    component: () => import('../views/Projects.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/projects/:id/test-design',
+    name: 'TestDesign',
+    component: () => import('../views/TestDesign.vue'),
     meta: { requiresAuth: true },
   },
   {
     path: '/',
-    redirect: '/sample',
+    redirect: '/projects',
   },
 ]
 
@@ -32,7 +38,7 @@ router.beforeEach((to) => {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (to.path === '/login' && userStore.isLoggedIn) {
-    return { path: '/sample' }
+    return { path: '/projects' }
   }
   return true
 })

@@ -8,6 +8,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.health import router as health_router
 from app.api.chat import router as chat_router
+from app.api.test_design import router as test_design_router
+from app.api.documents import router as documents_router
 from app.config import settings
 from app.log import setup_logging
 
@@ -108,6 +110,8 @@ async def general_exception_handler(request: Request, exc: Exception):
 # 注册路由
 app.include_router(health_router)
 app.include_router(chat_router)
+app.include_router(test_design_router, prefix="/api/v1")
+app.include_router(documents_router, prefix="/api/v1")
 
 
 @app.middleware("http")

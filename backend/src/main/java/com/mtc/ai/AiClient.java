@@ -1,21 +1,26 @@
 package com.mtc.ai;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mtc.common.BusinessException;
 import com.mtc.common.ErrorCode;
 import com.mtc.common.TraceIdHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.net.URI;
+import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -30,6 +35,7 @@ public class AiClient {
     private final int readTimeoutMs;
     private final HttpClient httpClient;
     private final ExecutorService executor;
+    private final ObjectMapper objectMapper;
 
     public AiClient(
             @Value("${mtc.ai.base-url}") String baseUrl,
@@ -43,25 +49,80 @@ public class AiClient {
                 .version(HttpClient.Version.HTTP_1_1)
                 .build();
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
+        this.objectMapper = new ObjectMapper();
     }
 
     public SseEmitter streamChat(String message, Long userId) {
         String traceId = TraceIdHolder.get();
         String sessionId = UUID.randomUUID().toString();
 
+        Map<String, Object> bodyMap = new HashMap<>();
+        bodyMap.put("session_id", sessionId);
+        bodyMap.put("message", message);
+        bodyMap.put("trace_id", traceId);
+        bodyMap.put("user_id", userId);
+
+        String jsonBody = toJson(bodyMap);
+        return streamPost("/chat/stream", jsonBody, traceId);
+    }
+
+    public SseEmitter streamTestCases(Long projectId, String requirement, List<Long> docIds, String context) {
+        String traceId = TraceIdHolder.get();
+
+        Map<String, Object> bodyMap = new HashMap<>();
+        bodyMap.put("project_id", projectId);
+        bodyMap.put("requirement", requirement);
+        bodyMap.put("doc_ids", docIds != null ? docIds : List.of());
+        bodyMap.put("context", context != null ? context : "");
+        bodyMap.put("trace_id", traceId);
+
+        String jsonBody = toJson(bodyMap);
+        return streamPost("/api/v1/test-design/test-cases/generate", jsonBody, traceId);
+    }
+
+    public SseEmitter streamTestScripts(Long projectId, List<Map<String, Object>> testCases, String module, String baseUrl) {
+        String traceId = TraceIdHolder.get();
+
+        Map<String, Object> bodyMap = new HashMap<>();
+        bodyMap.put("project_id", projectId);
+        bodyMap.put("test_cases", testCases);
+        bodyMap.put("module", module);
+        bodyMap.put("base_url", baseUrl);
+        bodyMap.put("trace_id", traceId);
+
+        String jsonBody = toJson(bodyMap);
+        return streamPost("/api/v1/test-design/test-scripts/generate", jsonBody, traceId);
+    }
+
+    public SseEmitter streamTestData(Long projectId, List<Map<String, Object>> testCases, String module) {
+        String traceId = TraceIdHolder.get();
+
+        Map<String, Object> bodyMap = new HashMap<>();
+        bodyMap.put("project_id", projectId);
+        bodyMap.put("test_cases", testCases);
+        bodyMap.put("module", module);
+        bodyMap.put("trace_id", traceId);
+
+        String jsonBody = toJson(bodyMap);
+        return streamPost("/api/v1/test-design/test-data/generate", jsonBody, traceId);
+    }
+
+    /**
+     * 通用 SSE 流式 POST 请求
+     *
+     * @param path     请求路径（相对 baseUrl）
+     * @param jsonBody 请求体 JSON 字符串
+     * @param traceId  链路追踪 ID
+     * @return SseEmitter
+     */
+    private SseEmitter streamPost(String path, String jsonBody, String traceId) {
         SseEmitter emitter = new SseEmitter(0L); // 无超时，由空闲看门狗控制
 
-        // 构造请求体
-        String body = String.format(
-                "{\"session_id\":\"%s\",\"message\":\"%s\",\"trace_id\":\"%s\",\"user_id\":%d}",
-                sessionId, escapeJson(message), traceId, userId
-        );
-
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/chat/stream"))
+                .uri(URI.create(baseUrl + path))
                 .header("Content-Type", "application/json")
                 .header("X-Trace-Id", traceId)
-                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
                 .build();
 
         executor.submit(() -> {
@@ -73,14 +134,11 @@ public class AiClient {
 
                 int statusCode = response.statusCode();
                 if (statusCode != 200) {
-                    // A 段：还没开始吐数据就失败了
-                    log.warn("AI 服务返回非 200: {}", statusCode);
-                    emitter.completeWithError(
-                            new BusinessException(ErrorCode.DEPENDENCY_UNAVAILABLE));
+                    log.warn("AI 服务返回非 200, path={}, status={}", path, statusCode);
+                    sendErrorAndComplete(emitter, "AI 服务不可用（" + statusCode + "）");
                     return;
                 }
 
-                // B 段：流式转发
                 SseEventParser parser = new SseEventParser();
                 boolean metaReceived = false;
 
@@ -97,10 +155,8 @@ public class AiClient {
 
                             if (!metaReceived) {
                                 if (!"meta".equals(result.event)) {
-                                    // 首帧不是 meta，不合法
                                     log.warn("AI 首帧事件不是 meta: {}", result.event);
-                                    emitter.completeWithError(
-                                            new BusinessException(ErrorCode.DEPENDENCY_UNAVAILABLE));
+                                    sendErrorAndComplete(emitter, "AI 服务响应格式异常");
                                     return;
                                 }
                                 metaReceived = true;
@@ -116,43 +172,30 @@ public class AiClient {
                             }
                         }
 
-                        // 空闲超时看门狗
                         if (System.currentTimeMillis() - lastEventTime > readTimeoutMs) {
-                            log.warn("AI 流式响应空闲超时");
-                            emitter.send(SseEmitter.event()
-                                    .name("error")
-                                    .data("{\"code\":5001,\"message\":\"服务响应超时\"}"));
-                            emitter.complete();
+                            log.warn("AI 流式响应空闲超时, path={}", path);
+                            sendErrorAndComplete(emitter, "服务响应超时");
                             return;
                         }
                     }
 
-                    // 流结束但没收到 done/error
                     if (metaReceived) {
-                        log.warn("AI 流异常结束，未收到 done 或 error");
-                        emitter.send(SseEmitter.event()
-                                .name("error")
-                                .data("{\"code\":5001,\"message\":\"服务连接异常中断\"}"));
+                        log.warn("AI 流异常结束，未收到 done 或 error, path={}", path);
+                        sendErrorAndComplete(emitter, "服务连接异常中断");
+                    } else {
+                        sendErrorAndComplete(emitter, "服务无响应");
                     }
                     emitter.complete();
 
                 } catch (Exception e) {
-                    log.warn("流式转发异常: {}", e.getMessage());
-                    try {
-                        if (metaReceived) {
-                            emitter.send(SseEmitter.event()
-                                    .name("error")
-                                    .data("{\"code\":5001,\"message\":\"服务连接异常\"}"));
-                        }
-                    } catch (Exception ignored) {
-                    }
+                    log.warn("流式转发异常, path={}: {}", path, e.getMessage());
+                    sendErrorAndComplete(emitter, "服务连接异常");
                     emitter.complete();
                 }
 
             } catch (Exception e) {
-                log.warn("调用 AI 服务失败: {}", e.getMessage());
-                emitter.completeWithError(
-                        new BusinessException(ErrorCode.DEPENDENCY_UNAVAILABLE));
+                log.warn("调用 AI 服务失败, path={}: {}", path, e.getMessage());
+                sendErrorAndComplete(emitter, "AI 服务不可用");
             }
         });
 
@@ -162,21 +205,26 @@ public class AiClient {
         return emitter;
     }
 
-    private String escapeJson(String s) {
-        if (s == null) return "";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                default -> sb.append(c);
-            }
+    /**
+     * 发送 SSE error 事件并完成（避免 completeWithError 触发 Spring Security 异步 403）
+     */
+    private void sendErrorAndComplete(SseEmitter emitter, String message) {
+        try {
+            emitter.send(SseEmitter.event()
+                    .name("error")
+                    .data("{\"code\":5001,\"message\":\"" + message + "\"}"));
+            emitter.complete();
+        } catch (IOException e) {
+            log.debug("发送 error 事件失败: {}", e.getMessage());
         }
-        return sb.toString();
+    }
+
+    private String toJson(Map<String, Object> map) {
+        try {
+            return objectMapper.writeValueAsString(map);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "JSON 序列化失败");
+        }
     }
 
     /**
