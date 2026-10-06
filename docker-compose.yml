@@ -62,6 +62,7 @@ services:
       APP_ENV: ${APP_ENV}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
     ports:
       - "${AI_SERVICE_PORT}:8000"
 

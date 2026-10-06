@@ -27,7 +27,9 @@ SYSTEM_PROMPT = """你是一位资深的自动化测试工程师，擅长使用 
 
 输出格式：
 直接输出完整的 TypeScript 代码，用 ```typescript 代码块包裹。
-代码顶部要有文件说明注释。"""
+代码顶部要有文件说明注释。
+重要：代码必须有正确的换行和缩进，每个语句占一行，禁止压缩成单行！
+重要：class 的 getter/setter 中 get/set 关键字和属性名之间必须有空格！"""
 
 
 class TestScriptAgent:
@@ -118,7 +120,17 @@ class TestScriptAgent:
 
     def _extract_code(self, text: str) -> str:
         """从 markdown 输出中提取代码"""
+        text = text.strip()
+        # 标准格式：```typescript\n代码\n```
         match = re.search(r"```(?:typescript|ts|javascript|js)?\s*\n([\s\S]*?)\n```", text)
+        if match:
+            return match.group(1).strip()
+        # 非标准格式：```typescript代码```（语言标识和代码在同一行，无换行）
+        match = re.search(r"```(?:typescript|ts|javascript|js)([\s\S]*?)```", text)
+        if match:
+            return match.group(1).strip()
+        # 只有 ``` 没有语言标识的情况
+        match = re.search(r"```\n?([\s\S]*?)\n?```", text)
         if match:
             return match.group(1).strip()
         # 没有代码块，直接返回原文

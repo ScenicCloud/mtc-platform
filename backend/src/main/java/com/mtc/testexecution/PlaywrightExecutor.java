@@ -54,9 +54,10 @@ public class PlaywrightExecutor {
         log.info("Playwright 执行目录: {}", runDir);
 
         try {
-            // 2. 写入脚本文件
+            // 2. 写入脚本文件（剥离 markdown 代码块标记）
             Path specFile = runDir.resolve("tests").resolve(scriptName);
-            Files.writeString(specFile, scriptContent, StandardCharsets.UTF_8);
+            String cleanContent = stripMarkdownCodeBlocks(scriptContent);
+            Files.writeString(specFile, cleanContent, StandardCharsets.UTF_8);
             log.info("写入脚本文件: {}", specFile);
 
             // 3. 写入 playwright.config.ts
@@ -67,16 +68,62 @@ public class PlaywrightExecutor {
             // 4. 确保依赖已安装
             installDependencies(runDir, logConsumer);
 
-            // 5. 安装浏览器（如需要）
+            // 5. 修复代码换行（AI 生成的压缩代码单行过长会导致 Playwright 无法扫描）
+            fixCodeLineBreaks(specFile);
+
+            // 6. 格式化脚本（修复缩进、空格等）
+            formatScript(runDir, specFile, logConsumer);
+
+            // 7. 安装浏览器（如需要）
             installBrowsers(runDir, logConsumer);
 
-            // 6. 执行测试
+            // 8. 执行测试
             return runTests(runDir, specFile, logConsumer);
 
         } finally {
             // 7. 清理工作目录（保留截图等产物在结果里）
             // 暂时不删，便于调试；生产环境可加配置控制
         }
+    }
+
+    private static final java.util.regex.Pattern LANG_PATTERN =
+            java.util.regex.Pattern.compile("^(typescript|ts|javascript|js|python|java|bash|shell|json)");
+
+    /**
+     * 剥离脚本内容中的 markdown 代码块标记
+     * 支持标准格式（```typescript\n代码\n```）和非标准格式（```typescript代码```）
+     */
+    private String stripMarkdownCodeBlocks(String content) {
+        if (content == null || content.isBlank()) {
+            return content;
+        }
+        String trimmed = content.trim();
+
+        // 处理开头的 ```language 标记
+        if (trimmed.startsWith("```")) {
+            // 去掉开头的3个反引号
+            trimmed = trimmed.substring(3);
+            // 找到第一个换行符；如果在开头20个字符内有换行，去掉语言标识行
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline >= 0 && firstNewline <= 20) {
+                // 标准格式：第一行是语言标识
+                trimmed = trimmed.substring(firstNewline + 1);
+            } else {
+                // 非标准格式：语言标识和代码在同一行，用正则匹配已知语言
+                java.util.regex.Matcher m = LANG_PATTERN.matcher(trimmed);
+                if (m.find()) {
+                    trimmed = trimmed.substring(m.end());
+                }
+            }
+
+            // 去掉结尾的 ```
+            if (trimmed.endsWith("```")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 3);
+            }
+            // 再去掉结尾可能的换行和空格
+            trimmed = trimmed.trim();
+        }
+        return trimmed;
     }
 
     private Path prepareWorkDir(String scriptName) throws IOException {
@@ -133,7 +180,8 @@ public class PlaywrightExecutor {
               "version": "1.0.0",
               "private": true,
               "devDependencies": {
-                "@playwright/test": "^1.63.0"
+                "@playwright/test": "^1.63.0",
+                "prettier": "^3.4.0"
               }
             }
             """;
@@ -158,6 +206,58 @@ public class PlaywrightExecutor {
             throw new RuntimeException("npm install 失败，退出码: " + exitCode);
         }
         logConsumer.accept("[系统] 依赖安装完成");
+    }
+
+    private void fixCodeLineBreaks(Path specFile) throws IOException {
+        String content = Files.readString(specFile, StandardCharsets.UTF_8);
+        // 如果已经有很多换行了，不需要处理
+        long newlineCount = content.chars().filter(c -> c == '\n').count();
+        if (newlineCount > 10) {
+            return;
+        }
+        // 在分号后加换行（保留分号）
+        content = content.replaceAll(";", ";\n");
+        // 在左大括号后加换行
+        content = content.replaceAll("\\{", "{\n");
+        // 在右大括号前后加换行
+        content = content.replaceAll("\\}", "\n}\n");
+        // 在逗号后加空格（帮助 prettier 更好地格式化）
+        content = content.replaceAll(",([^\\s])", ", $1");
+        // 清理多余的空行
+        content = content.replaceAll("\n{3,}", "\n\n");
+        Files.writeString(specFile, content, StandardCharsets.UTF_8);
+    }
+
+    private void formatScript(Path runDir, Path specFile, Consumer<String> logConsumer)
+            throws IOException, InterruptedException {
+        logConsumer.accept("[系统] 格式化脚本...");
+
+        // 脚本在 tests/ 子目录下，prettier 从 runDir 根目录运行
+        String relativePath = runDir.relativize(specFile).toString();
+
+        ProcessBuilder pb = new ProcessBuilder(
+                "npx", "prettier", "--write", relativePath
+        );
+        pb.directory(runDir.toFile());
+        pb.redirectErrorStream(true);
+
+        Process process = pb.start();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                // prettier 输出比较简洁，直接透传
+                logConsumer.accept("[prettier] " + line);
+            }
+        }
+
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            log.warn("Prettier 格式化退出码: {}，将尝试继续执行", exitCode);
+            logConsumer.accept("[系统] 脚本格式化失败，将尝试直接执行");
+        } else {
+            logConsumer.accept("[系统] 脚本格式化完成");
+        }
     }
 
     private void installBrowsers(Path runDir, Consumer<String> logConsumer)
@@ -197,8 +297,7 @@ public class PlaywrightExecutor {
 
         ProcessBuilder pb = new ProcessBuilder(
                 "npx", "playwright", "test",
-                specFile.getFileName().toString(),
-                "--reporter=list,json"
+                specFile.getFileName().toString()
         );
         pb.directory(runDir.toFile());
         pb.redirectErrorStream(true);
