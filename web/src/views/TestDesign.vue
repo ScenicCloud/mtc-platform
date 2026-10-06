@@ -198,11 +198,25 @@
           <div class="toolbar">
             <span class="result-count">Playwright TypeScript 脚本</span>
             <div class="toolbar-actions">
-              <el-button :disabled="!testScriptCode" @click="handleCopyScript">
+              <el-button :disabled="!testScriptCode || isExecuting" @click="handleCopyScript">
                 复制
               </el-button>
-              <el-button :disabled="!testScriptCode" @click="handleDownloadScript">
+              <el-button :disabled="!testScriptCode || isExecuting" @click="handleDownloadScript">
                 下载
+              </el-button>
+              <el-button
+                type="success"
+                :disabled="!testScriptCode || isExecuting || isStreaming"
+                @click="handleSaveScript"
+              >
+                保存到项目
+              </el-button>
+              <el-button
+                type="primary"
+                :disabled="!testScriptCode || isExecuting || isStreaming"
+                @click="handleExecuteScript"
+              >
+                ▶ 执行测试
               </el-button>
             </div>
           </div>
@@ -215,12 +229,96 @@
             </div>
           </div>
 
-          <div v-else class="code-wrapper">
-            <pre v-if="testScriptCode" class="code-block"><code>{{ testScriptCode }}</code></pre>
-            <el-empty
-              v-else
-              description="请选择用例后生成测试脚本"
-            />
+          <div v-else class="script-content-wrapper">
+            <div class="code-wrapper">
+              <pre v-if="testScriptCode" class="code-block"><code>{{ testScriptCode }}</code></pre>
+              <el-empty
+                v-else
+                description="请选择用例后生成测试脚本"
+              />
+            </div>
+
+            <!-- 执行结果面板 -->
+            <div v-if="isExecuting || executionStatus" class="execution-panel">
+              <div class="execution-header">
+                <div class="execution-title">
+                  <span class="execution-indicator" :class="executionStatusClass"></span>
+                  执行结果
+                </div>
+                <el-button
+                  v-if="isExecuting"
+                  type="danger"
+                  size="small"
+                  plain
+                  @click="handleStopExecution"
+                >
+                  停止执行
+                </el-button>
+              </div>
+
+              <!-- 执行统计 -->
+              <div v-if="executionSummary" class="execution-stats">
+                <div class="stat-item">
+                  <div class="stat-value">{{ executionSummary.total }}</div>
+                  <div class="stat-label">总用例</div>
+                </div>
+                <div class="stat-item stat-passed">
+                  <div class="stat-value">{{ executionSummary.passed }}</div>
+                  <div class="stat-label">通过</div>
+                </div>
+                <div class="stat-item stat-failed">
+                  <div class="stat-value">{{ executionSummary.failed }}</div>
+                  <div class="stat-label">失败</div>
+                </div>
+                <div class="stat-item stat-skipped">
+                  <div class="stat-value">{{ executionSummary.skipped }}</div>
+                  <div class="stat-label">跳过</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-value">{{ formatDuration(executionSummary.durationMs) }}</div>
+                  <div class="stat-label">耗时</div>
+                </div>
+              </div>
+
+              <!-- 执行日志 -->
+              <div class="execution-log">
+                <div class="log-header">执行日志</div>
+                <div class="log-content" ref="executionLogRef">
+                  <div
+                    v-for="(log, idx) in executionLogs"
+                    :key="idx"
+                    class="log-line"
+                    :class="getLogLineClass(log)"
+                  >
+                    {{ log }}
+                  </div>
+                  <div v-if="isExecuting" class="log-line log-pending">
+                    执行中...
+                    <span class="cursor">▌</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 用例结果列表 -->
+              <div v-if="executionResults.length > 0" class="execution-results">
+                <div class="results-header">用例详情</div>
+                <div class="results-list">
+                  <div
+                    v-for="result in executionResults"
+                    :key="result.title"
+                    class="result-item"
+                  >
+                    <div class="result-status">
+                      <el-tag :type="getResultTagType(result.status)" size="small">
+                        {{ getResultStatusText(result.status) }}
+                      </el-tag>
+                    </div>
+                    <div class="result-title">{{ result.title }}</div>
+                    <div class="result-duration">{{ result.durationMs }}ms</div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -257,7 +355,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../store/user'
@@ -273,6 +371,12 @@ import {
   getTestCases,
   type TestCase,
 } from '../api/testCase'
+import { createTestScript } from '../api/testScript'
+import {
+  executeScriptContent,
+  type SseStreamResult as ExecSseStreamResult,
+  type TestRunResult,
+} from '../api/testExecution'
 
 const route = useRoute()
 const router = useRouter()
@@ -300,6 +404,30 @@ const testScriptCode = ref('')
 
 // 测试数据
 const testDataJson = ref('')
+
+// ========== 脚本执行相关 ==========
+const isExecuting = ref(false)
+const executionStatus = ref('') // running / completed / failed / ''
+const executionLogs = ref<string[]>([])
+const executionSummary = ref<{
+  total: number
+  passed: number
+  failed: number
+  skipped: number
+  durationMs: number
+} | null>(null)
+const executionResults = ref<TestRunResult[]>([])
+let executionRequest: ExecSseStreamResult | null = null
+const executionLogRef = ref<HTMLElement | null>(null)
+
+const executionStatusClass = computed(() => {
+  const map: Record<string, string> = {
+    running: 'status-running',
+    completed: 'status-passed',
+    failed: 'status-failed',
+  }
+  return map[executionStatus.value] || ''
+})
 
 // 用例选择
 const selectedCaseIds = ref<number[]>([])
@@ -667,6 +795,216 @@ const handleCopyData = async () => {
   }
 }
 
+// ========== 保存脚本到项目 ==========
+
+const handleSaveScript = async () => {
+  if (!testScriptCode.value) return
+  try {
+    const scriptName = `test-${Date.now()}.spec.ts`
+    await createTestScript({
+      projectId: projectId.value,
+      name: scriptName,
+      framework: 'playwright',
+      language: 'typescript',
+      content: testScriptCode.value,
+      status: 'ready',
+    })
+    ElMessage.success('脚本已保存到项目')
+  } catch {
+    // 错误已在拦截器提示
+  }
+}
+
+// ========== 执行脚本 ==========
+
+const handleExecuteScript = () => {
+  if (!testScriptCode.value || isExecuting.value) return
+
+  // 重置状态
+  executionLogs.value = []
+  executionSummary.value = null
+  executionResults.value = []
+  executionStatus.value = 'running'
+  isExecuting.value = true
+
+  const scriptName = `generated-${Date.now()}.spec.ts`
+
+  executionRequest = executeScriptContent(
+    {
+      projectId: projectId.value,
+      content: testScriptCode.value,
+      name: scriptName,
+      baseUrl: baseUrl.value,
+    },
+    userStore.token
+  )
+
+  executionRequest.onEvent((event) => {
+    if (event.event === 'start') {
+      try {
+        const data = JSON.parse(event.data)
+        executionLogs.value.push(`[开始] 运行 ID: ${data.runId}`)
+      } catch {
+        executionLogs.value.push('[开始] 测试执行已启动')
+      }
+    } else if (event.event === 'status') {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.status === 'running') {
+          executionLogs.value.push('[系统] 测试运行中...')
+        }
+      } catch {
+        // ignore
+      }
+    } else if (event.event === 'log') {
+      try {
+        const data = JSON.parse(event.data)
+        executionLogs.value.push(data.message || '')
+      } catch {
+        executionLogs.value.push(event.data)
+      }
+      // 自动滚动到底部
+      nextTick(() => {
+        if (executionLogRef.value) {
+          executionLogRef.value.scrollTop = executionLogRef.value.scrollHeight
+        }
+      })
+    } else if (event.event === 'done') {
+      try {
+        const data = JSON.parse(event.data)
+        executionSummary.value = {
+          total: data.total || 0,
+          passed: data.passed || 0,
+          failed: data.failed || 0,
+          skipped: data.skipped || 0,
+          durationMs: data.durationMs || 0,
+        }
+        executionStatus.value = data.status || 'completed'
+
+        // 加载详细结果（稍后通过 runId 查询）
+        // 先从日志里简单解析一下用例列表
+        parseResultsFromLogs()
+      } catch {
+        executionStatus.value = 'completed'
+      }
+    } else if (event.event === 'error') {
+      try {
+        const err = JSON.parse(event.data)
+        executionLogs.value.push(`[错误] ${err.message || '未知错误'}`)
+      } catch {
+        executionLogs.value.push(`[错误] ${event.data}`)
+      }
+      executionStatus.value = 'failed'
+    }
+  })
+
+  executionRequest.onError((msg) => {
+    isExecuting.value = false
+    executionStatus.value = 'failed'
+    executionLogs.value.push(`[错误] ${msg}`)
+    executionRequest = null
+    if (msg !== '已取消') {
+      ElMessage.error(msg)
+    }
+  })
+
+  executionRequest.onDone(() => {
+    isExecuting.value = false
+    executionRequest = null
+  })
+}
+
+const handleStopExecution = () => {
+  if (executionRequest) {
+    executionRequest.abort()
+    executionRequest = null
+    executionStatus.value = 'cancelled'
+    isExecuting.value = false
+    executionLogs.value.push('[系统] 执行已停止')
+  }
+}
+
+// 从日志中解析用例结果
+const parseResultsFromLogs = () => {
+  const results: TestRunResult[] = []
+  const logs = executionLogs.value
+
+  for (const line of logs) {
+    // 匹配 Playwright list reporter 格式: ✓ 用例标题 (xxms) 或 ✗ 用例标题 (xxms)
+    const passMatch = line.match(/✓\s+(.+?)\s+\((\d+)ms\)/)
+    const failMatch = line.match(/[✗✘x]\s+(.+?)\s+\((\d+)ms\)/)
+    const skipMatch = line.match(/[○◌\-]\s+(.+?)\s+\((\d+)ms\)/)
+
+    if (passMatch) {
+      results.push({
+        id: results.length + 1,
+        runId: 0,
+        title: passMatch[1].trim(),
+        status: 'passed',
+        durationMs: parseInt(passMatch[2]),
+        createdAt: new Date().toISOString(),
+      })
+    } else if (failMatch) {
+      results.push({
+        id: results.length + 1,
+        runId: 0,
+        title: failMatch[1].trim(),
+        status: 'failed',
+        durationMs: parseInt(failMatch[2]),
+        createdAt: new Date().toISOString(),
+      })
+    } else if (skipMatch) {
+      results.push({
+        id: results.length + 1,
+        runId: 0,
+        title: skipMatch[1].trim(),
+        status: 'skipped',
+        durationMs: parseInt(skipMatch[2]),
+        createdAt: new Date().toISOString(),
+      })
+    }
+  }
+
+  if (results.length > 0) {
+    executionResults.value = results
+  }
+}
+
+const formatDuration = (ms?: number) => {
+  if (!ms) return '0ms'
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(2)}s`
+}
+
+const getResultTagType = (status: string) => {
+  const map: Record<string, string> = {
+    passed: 'success',
+    failed: 'danger',
+    skipped: 'info',
+    timedOut: 'warning',
+  }
+  return map[status] || 'info'
+}
+
+const getResultStatusText = (status: string) => {
+  const map: Record<string, string> = {
+    passed: '通过',
+    failed: '失败',
+    skipped: '跳过',
+    timedOut: '超时',
+  }
+  return map[status] || status
+}
+
+const getLogLineClass = (line: string) => {
+  if (line.startsWith('[错误]') || line.startsWith('[ERROR]')) return 'log-error'
+  if (line.startsWith('[警告]') || line.startsWith('[WARN]')) return 'log-warn'
+  if (line.startsWith('[系统]') || line.startsWith('[开始]')) return 'log-system'
+  if (line.includes('✓')) return 'log-pass'
+  if (line.includes('✗') || line.includes('✘') || line.includes(' 1) ')) return 'log-fail'
+  return ''
+}
+
 // ========== 导航 ==========
 
 const goBack = () => {
@@ -994,5 +1332,226 @@ onMounted(() => {
 
 .code-block code {
   font-family: inherit;
+}
+
+/* ========== 脚本内容区 ========== */
+.script-content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.script-content-wrapper .code-wrapper {
+  max-height: 50%;
+  min-height: 200px;
+  flex-shrink: 0;
+}
+
+/* ========== 执行结果面板 ========== */
+.execution-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin: 16px 24px;
+  margin-top: 0;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.execution-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.execution-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.execution-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #909399;
+}
+
+.execution-indicator.status-running {
+  background: #409eff;
+  animation: pulse 1.5s infinite;
+}
+
+.execution-indicator.status-passed {
+  background: #67c23a;
+}
+
+.execution-indicator.status-failed {
+  background: #f56c6c;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.execution-stats {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.stat-item {
+  flex: 1;
+  padding: 16px 12px;
+  text-align: center;
+  border-right: 1px solid #ebeef5;
+}
+
+.stat-item:last-child {
+  border-right: none;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #303133;
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.stat-passed .stat-value {
+  color: #67c23a;
+}
+
+.stat-failed .stat-value {
+  color: #f56c6c;
+}
+
+.stat-skipped .stat-value {
+  color: #909399;
+}
+
+.execution-log {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 150px;
+  max-height: 300px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.log-header {
+  padding: 10px 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #ebeef5;
+  font-size: 13px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.log-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.8;
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+
+.log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-line.log-system {
+  color: #569cd6;
+}
+
+.log-line.log-error {
+  color: #f56c6c;
+}
+
+.log-line.log-warn {
+  color: #e6a23c;
+}
+
+.log-line.log-pass {
+  color: #67c23a;
+}
+
+.log-line.log-fail {
+  color: #f56c6c;
+}
+
+.log-line.log-pending {
+  color: #909399;
+  font-style: italic;
+}
+
+.execution-results {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.results-header {
+  padding: 10px 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #ebeef5;
+  font-size: 13px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.results-list {
+  padding: 8px 0;
+}
+
+.result-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.result-item:last-child {
+  border-bottom: none;
+}
+
+.result-status {
+  flex-shrink: 0;
+}
+
+.result-title {
+  flex: 1;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-duration {
+  flex-shrink: 0;
+  color: #909399;
+  font-size: 12px;
+  font-family: monospace;
 }
 </style>

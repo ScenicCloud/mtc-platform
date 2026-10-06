@@ -319,8 +319,8 @@
           </p>
           <div class="intro-meta">
             <div class="intro-meta__item"><span class="intro-meta__label">版本</span><span class="intro-meta__value">V1.0</span></div>
-            <div class="intro-meta__item"><span class="intro-meta__label">状态</span><span class="intro-meta__value">已实现 MVP</span></div>
-            <div class="intro-meta__item"><span class="intro-meta__label">日期</span><span class="intro-meta__value">2026-10-05</span></div>
+                <div class="intro-meta__item"><span class="intro-meta__label">状态</span><span class="intro-meta__value">V1.0 已实现</span></div>
+                <div class="intro-meta__item"><span class="intro-meta__label">日期</span><span class="intro-meta__value">2026-10-06</span></div>
             <div class="intro-meta__item"><span class="intro-meta__label">负责人</span><span class="intro-meta__value">MTC 产品组</span></div>
           </div>
         </div>
@@ -586,7 +586,7 @@
                   <td>保存脚本到项目</td>
                   <td>将生成的脚本保存到项目，支持版本管理</td>
                   <td><span class="tag tag--warning">P1</span></td>
-                  <td><span class="tag tag--muted">待实现</span></td>
+                  <td><span class="tag tag--success">已实现</span></td>
                 </tr>
               </tbody>
             </table>
@@ -635,10 +635,11 @@
             在平台上直接运行自动化测试脚本，查看执行结果，形成"生成-执行-反馈"的完整闭环。
           </p>
 
-          <div class="callout callout--warning">
+          <div class="callout callout--success">
             <div class="callout__title">V1.0 范围说明</div>
             <p>
-              V1.0 MVP 已完成测试设计闭环（用例/脚本/数据生成）。测试执行功能为 V1.0 完整版本目标，当前处于规划中，将作为下一个迭代实现。
+              V1.0 测试执行功能已实现核心闭环：脚本生成 → 保存到项目 → 在线执行 → 实时日志 → 结果统计。
+              失败截图和执行历史 UI 在当前版本提供 API 支持，界面展示将在后续迭代完善。
             </p>
           </div>
 
@@ -659,35 +660,35 @@
                   <td>选择脚本执行</td>
                   <td>用户选择已生成的测试脚本，点击执行</td>
                   <td><span class="tag tag--success">P0</span></td>
-                  <td><span class="tag tag--muted">待实现</span></td>
+                  <td><span class="tag tag--success">已实现</span></td>
                 </tr>
                 <tr>
                   <td>F-TE-02</td>
                   <td>执行进度展示</td>
                   <td>实时展示测试执行进度，包括当前执行的用例、已通过/失败数量</td>
                   <td><span class="tag tag--success">P0</span></td>
-                  <td><span class="tag tag--muted">待实现</span></td>
+                  <td><span class="tag tag--success">已实现</span></td>
                 </tr>
                 <tr>
                   <td>F-TE-03</td>
                   <td>执行结果查看</td>
                   <td>展示测试执行结果汇总：通过率、失败用例列表、执行耗时</td>
                   <td><span class="tag tag--success">P0</span></td>
-                  <td><span class="tag tag--muted">待实现</span></td>
+                  <td><span class="tag tag--success">已实现</span></td>
                 </tr>
                 <tr>
                   <td>F-TE-04</td>
                   <td>失败截图查看</td>
                   <td>失败的用例自动截图，点击可查看失败时的页面状态</td>
                   <td><span class="tag tag--warning">P1</span></td>
-                  <td><span class="tag tag--muted">待实现</span></td>
+                  <td><span class="tag tag--warning">API就绪</span></td>
                 </tr>
                 <tr>
                   <td>F-TE-05</td>
                   <td>执行历史</td>
                   <td>查看历史执行记录，支持按时间筛选</td>
                   <td><span class="tag tag--warning">P1</span></td>
-                  <td><span class="tag tag--muted">待实现</span></td>
+                  <td><span class="tag tag--warning">API就绪</span></td>
                 </tr>
               </tbody>
             </table>
@@ -1027,9 +1028,9 @@
             </div>
             <div class="timeline__item">
               <div class="timeline__title">V1.0 — 自动化执行最小闭环</div>
-              <div class="timeline__time">规划中（下一个迭代）</div>
+              <div class="timeline__time">已完成 ✓</div>
               <div class="timeline__desc">
-                在线测试执行 + 执行结果展示 + 失败截图 + 执行历史。
+                在线测试执行 + 执行结果展示 + 实时日志 + 脚本保存管理。
                 形成"生成 → 执行 → 反馈"的完整自动化测试闭环。
               </div>
             </div>
@@ -1190,14 +1191,14 @@
             <li>生成的脚本下载后可在本地 Playwright 环境中运行通过</li>
           </ul>
 
-          <h3>V1.0 完整版验收标准（待实现）</h3>
+          <h3>V1.0 完整版验收标准（已通过核心功能）</h3>
           <ul class="feature-list">
             <li>用户可以在平台上直接触发测试脚本执行</li>
-            <li>执行过程实时展示进度和结果</li>
+            <li>执行过程实时展示日志和进度</li>
             <li>执行完成后展示通过率、失败用例等汇总信息</li>
-            <li>失败用例可查看截图和错误信息</li>
-            <li>支持查看历史执行记录</li>
-            <li>测试脚本支持保存和版本管理</li>
+            <li>测试脚本支持保存到项目管理</li>
+            <li>失败用例自动截图（API 层支持，界面展示待完善）</li>
+            <li>支持查看历史执行记录（API 层支持，界面展示待完善）</li>
             <li>测试数据支持保存和复用</li>
           </ul>
         </section>

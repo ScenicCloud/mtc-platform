@@ -75,6 +75,15 @@ services:
     environment:
       - VITE_API_BASE_URL=http://localhost:${BACKEND_PORT}
 
+  # Demo 待测应用（TodoList）
+  demo-app:
+    image: nginx:alpine
+    container_name: mtc-demo-app
+    volumes:
+      - ./demo-app:/usr/share/nginx/html:ro
+    ports:
+      - "${DEMO_APP_PORT:-3000}:80"
+
 volumes:
   pgdata:
   redisdata:

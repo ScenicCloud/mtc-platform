@@ -12,3 +12,4 @@ venv/
 .vscode/
 *.log
 .DS_Store
+.trae-html-share-packages/
